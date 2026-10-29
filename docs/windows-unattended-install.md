@@ -112,7 +112,16 @@ $process = Start-Process -FilePath $installer -ArgumentList ($installerArguments
 if ($process.ExitCode -ne 0) {
     throw "Installer exited with code $($process.ExitCode). Inspect the installation before retrying."
 }
-Get-Service -Name 'openuem-agent'
+$service = Get-Service -Name 'openuem-agent'
+$service.WaitForStatus(
+    [System.ServiceProcess.ServiceControllerStatus]::Running,
+    [TimeSpan]::FromSeconds(60)
+)
+$service.Refresh()
+if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+    throw 'Agent service is not running. Inspect its logs before retrying.'
+}
+$service
 ```
 
 The `/server` value is the NATS endpoint, which may differ from the console's
@@ -126,6 +135,7 @@ using this fresh-install example; do not delete existing credentials to bypass i
 The silent switches suppress installer interaction and automatic reboot. A
 nonzero result requires investigation; this example does not automatically
 retry or treat a reboot-required result as success.
+The service check fails if the agent does not reach Running within 60 seconds.
 
 ## Check admission, reporting and credentials
 
