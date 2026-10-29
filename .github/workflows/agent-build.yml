@@ -1,0 +1,54 @@
+name: Agent build validation
+
+on:
+  push:
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Compile checks only: no agent execution, installation, or release artifacts.
+# These jobs do not establish Windows/Linux runtime or security acceptance.
+jobs:
+  build:
+    name: Compile agent (${{ matrix.goos }}/amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows]
+    defaults:
+      run:
+        shell: bash
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Check out source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Set up the declared Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+          check-latest: false
+      - name: Verify toolchain and locked dependencies
+        run: |
+          go version
+          expected="go$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          test "$(go env GOVERSION)" = "$expected"
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+      - name: Compile platform packages
+        run: |
+          go build -trimpath ./...
+          git diff --exit-code -- go.mod go.sum
