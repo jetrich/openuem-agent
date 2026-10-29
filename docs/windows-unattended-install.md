@@ -4,6 +4,7 @@ Use this checklist when delivering the Windows agent through a deployment tool.
 The installer options are described in the
 [Windows installation reference](https://openuem.eu/docs/Installation/Agent/windows/).
 This example is for a fresh installation; handle upgrades separately.
+Windows Server support is limited; some inventory fields may be absent from reports.
 
 ## Prepare the installation
 
@@ -71,18 +72,31 @@ foreach ($uninstallRoot in @(
 $hasTenant = -not [string]::IsNullOrWhiteSpace([string]$tenantId)
 $hasSite = -not [string]::IsNullOrWhiteSpace([string]$siteId)
 if ($hasTenant -ne $hasSite) { throw 'Set both tenantId and siteId, or leave both null.' }
-if ($hasTenant -and (([string]$tenantId -notmatch '^[1-9][0-9]*$') -or
-                    ([string]$siteId -notmatch '^[1-9][0-9]*$'))) {
+if ($hasTenant -and (([string]$tenantId -notmatch '\A[1-9][0-9]*\z') -or
+                    ([string]$siteId -notmatch '\A[1-9][0-9]*\z'))) {
     throw 'Tenant and site IDs must be positive integers from the console.'
 }
+if ($natsServer -match '\s') { throw 'Whitespace is not permitted in the NATS server list.' }
+$dnsLabel = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
 foreach ($endpoint in $natsServer.Split(',')) {
-    if ($endpoint -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5}$') {
+    if ($endpoint -notmatch "\A(?<dnsHost>$dnsLabel(?:\.$dnsLabel)*):(?<port>[0-9]{1,5})\z") {
         throw 'Use DNS-name:port or IPv4:port, separated by commas for a cluster.'
     }
-    $port = [int]($endpoint.Split(':')[-1])
+    $dnsHost = $Matches.dnsHost
+    $port = [int]$Matches.port
+    if ($dnsHost.Length -gt 253) { throw 'NATS hostname is too long.' }
+    if ($dnsHost -match '\A[0-9.]+\z') {
+        $octets = $dnsHost.Split('.')
+        if ($octets.Count -ne 4) { throw 'Use a four-octet IPv4 address.' }
+        foreach ($octet in $octets) {
+            if ($octet -notmatch '\A(?:0|[1-9][0-9]{0,2})\z' -or [int]$octet -gt 255) {
+                throw 'Invalid IPv4 address.'
+            }
+        }
+    }
     if ($port -lt 1 -or $port -gt 65535) { throw 'Invalid NATS port.' }
 }
-if ($expectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+if ($expectedSha256 -notmatch '\A[0-9a-fA-F]{64}\z') {
     throw 'Set the published SHA256 for the selected installer.'
 }
 if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $expectedSha256) {
