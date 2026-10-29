@@ -7,7 +7,7 @@ This example is for a fresh installation; handle upgrades separately.
 
 ## Prepare the installation
 
-1. Use an elevated PowerShell session or a deployment job running as SYSTEM.
+1. Use an elevated 64-bit PowerShell session or a deployment job running as SYSTEM.
 2. Select an installer version and architecture from
    [Windows downloads](https://openuem.eu/docs/Downloads/windows/). Record its
    version, download URL and published SHA256 in the deployment definition.
@@ -34,9 +34,53 @@ $installer = 'C:\OpenUEM Bootstrap\openuem-agent-setup.exe'
 $credentials = 'C:\OpenUEM Bootstrap\enrollment'
 $natsServer = 'uem.example.com:4433'
 $expectedSha256 = 'REPLACE_WITH_THE_PUBLISHED_SHA256'
+# Set both IDs for explicit placement. Leave both null only for default placement.
+$tenantId = $null
+$siteId = $null
 
+if (-not [Environment]::Is64BitProcess) {
+    throw 'Use a 64-bit PowerShell process so both registry views can be inspected.'
+}
 if (Get-Service -Name 'openuem-agent' -ErrorAction SilentlyContinue) {
     throw 'An agent service already exists. Review the existing installation first.'
+}
+$installDirectories = @(
+    (Join-Path $env:ProgramFiles 'OpenUEM Agent')
+)
+if (${env:ProgramFiles(x86)}) {
+    $installDirectories += Join-Path ${env:ProgramFiles(x86)} 'OpenUEM Agent'
+}
+foreach ($directory in $installDirectories) {
+    if (Test-Path -LiteralPath $directory) {
+        throw "An installation directory already exists: $directory. Recover or uninstall it first."
+    }
+}
+foreach ($uninstallRoot in @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+)) {
+    if (Test-Path -LiteralPath $uninstallRoot) {
+        foreach ($entry in Get-ChildItem -LiteralPath $uninstallRoot) {
+            $registration = Get-ItemProperty -LiteralPath $entry.PSPath
+            if ($registration.DisplayName -like 'OpenUEM*Agent*') {
+                throw 'An agent uninstall registration exists. Recover or uninstall it first.'
+            }
+        }
+    }
+}
+$hasTenant = -not [string]::IsNullOrWhiteSpace([string]$tenantId)
+$hasSite = -not [string]::IsNullOrWhiteSpace([string]$siteId)
+if ($hasTenant -ne $hasSite) { throw 'Set both tenantId and siteId, or leave both null.' }
+if ($hasTenant -and (([string]$tenantId -notmatch '^[1-9][0-9]*$') -or
+                    ([string]$siteId -notmatch '^[1-9][0-9]*$'))) {
+    throw 'Tenant and site IDs must be positive integers from the console.'
+}
+foreach ($endpoint in $natsServer.Split(',')) {
+    if ($endpoint -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5}$') {
+        throw 'Use DNS-name:port or IPv4:port, separated by commas for a cluster.'
+    }
+    $port = [int]($endpoint.Split(':')[-1])
+    if ($port -lt 1 -or $port -gt 65535) { throw 'Invalid NATS port.' }
 }
 if ($expectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
     throw 'Set the published SHA256 for the selected installer.'
@@ -61,6 +105,9 @@ $installerArguments = @(
     "/key=`"$credentials\agent.key`""
     "/sftpcert=`"$credentials\sftp.cer`""
 )
+if ($hasTenant) {
+    $installerArguments += "/tenantid=$tenantId", "/siteid=$siteId"
+}
 $process = Start-Process -FilePath $installer -ArgumentList ($installerArguments -join ' ') -Wait -PassThru
 if ($process.ExitCode -ne 0) {
     throw "Installer exited with code $($process.ExitCode). Inspect the installation before retrying."
@@ -69,9 +116,12 @@ Get-Service -Name 'openuem-agent'
 ```
 
 The `/server` value is the NATS endpoint, which may differ from the console's
-HTTPS address. For organization and site placement, append `/tenantid=<number>`
-and `/siteid=<number>` together to the argument list. Obtain the actual numeric
-IDs from the console. Omitting both uses the installer's default placement.
+HTTPS address. This example accepts DNS names and IPv4 addresses, including a
+comma-separated cluster list. Set both placement variables to the numeric
+organization and site IDs from the console; the example appends both installer
+switches together. Leaving both null deliberately selects default placement.
+Any detected existing installation requires recovery or uninstallation before
+using this fresh-install example; do not delete existing credentials to bypass it.
 
 The silent switches suppress installer interaction and automatic reboot. A
 nonzero result requires investigation; this example does not automatically
