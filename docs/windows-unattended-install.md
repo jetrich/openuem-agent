@@ -183,3 +183,9 @@ The example requires your Windows acceptance checks, including process argument
 quoting, Authenticode, permissions, service startup, admission and reporting.
 It does not establish per-device enrollment credentials, customer isolation or
 production readiness. Validate those separately before fleet deployment.
+
+For documentation changes, run `./scripts/Test-WindowsInstallDocs.ps1` from the
+repository root. The documentation workflow runs this check in Windows PowerShell
+5.1 and PowerShell 7. It parses both examples and tests the guide's placement and
+server validation with valid and invalid inputs. It does not run the installer
+or any registry, service, certificate or permissions commands.
